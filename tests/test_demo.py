@@ -84,3 +84,32 @@ class MySQLDemoTest(unittest.TestCase):
         self.assertFalse(app.error)
         self.assertEqual(app.metric[4].value, "13")
         self.assertIn("idx_ratings_rated_at", app.code[-1].value)
+
+    def test_query_dropdowns_show_sql_for_current_filters(self):
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=20).run()
+
+        def sql_blocks(container):
+            expander, = [item for item in container.get("expander") if item.label == "SQL queries"]
+            return [block.value for block in expander.code]
+
+        app.text_input[0].set_value("Toy_Story%").run()
+        search_sql, = sql_blocks(app)
+        self.assertIn("LIKE '%Toy!_Story!%%' ESCAPE '!'", search_sql)
+
+        app.radio(key="section").set_value("Rankings").run()
+        app.number_input(key="overall_min").set_value(30).run()
+        overall, by_genre, summary = app.tabs
+        self.assertIn("HAVING COUNT(*) >= 30", sql_blocks(overall)[0])
+        self.assertIn("g.genre_name = 'Drama'", sql_blocks(by_genre)[0])
+        self.assertIn("GROUP BY g.genre_id", sql_blocks(summary)[0])
+
+        app.radio(key="section").set_value("Rating activity").run()
+        app.date_input[0].set_value((date(2017, 1, 2), date(2017, 1, 3))).run()
+        by_date, by_user = app.tabs
+        count_sql, activity_sql = sql_blocks(by_date)
+        for sql in (count_sql, activity_sql):
+            self.assertIn("r.rated_at >= '2017-01-02' AND r.rated_at < '2017-01-04'", sql)
+        self.assertIn("LIMIT 250", activity_sql)
+        self.assertIn("GROUP BY user_id", sql_blocks(by_user)[0])

@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from textwrap import dedent
 
 import pandas as pd
 import streamlit as st
@@ -50,15 +51,25 @@ def show_table(rows, empty_message="No results for these filters."):
     st.dataframe(frame.rename(columns=COLUMN_LABELS), hide_index=True, column_config=formats)
 
 
+def show_sql(db, *queries):
+    with st.expander("SQL queries"), db.cursor() as cursor:
+        for label, (sql, params) in queries:
+            if label:
+                st.caption(label)
+            st.code(dedent(cursor.mogrify(sql, params)).strip(), language="sql")
+
+
 def explore(db):
     st.subheader("Find a movie")
     title_col, genre_col = st.columns([2, 1])
     title = title_col.text_input("Title contains", value="Toy Story", max_chars=255)
     genre = genre_col.selectbox("Genre", ["All genres", *q.genres(db)])
-    rows = q.search(db, title, None if genre == "All genres" else genre)
+    selected_genre = None if genre == "All genres" else genre
+    rows = q.search(db, title, selected_genre)
     show_table(rows, "No titles match this search.")
     if rows:
         st.caption("Up to 50 movies, ordered by title. Blank tag cells mean no tags in this snapshot.")
+    show_sql(db, (None, q.search_query(title, selected_genre)))
 
 
 def rankings(db):
@@ -68,6 +79,7 @@ def rankings(db):
         minimum = st.number_input("Minimum ratings", min_value=1, value=20, step=1, key="overall_min")
         show_table(q.rankings(db, minimum))
         st.caption("Top 25 by average rating. Ties favor movies with more ratings.")
+        show_sql(db, (None, q.rankings_query(minimum)))
     with by_genre:
         first, last = q.year_bounds(db)
         choices = q.genres(db)
@@ -84,15 +96,16 @@ def rankings(db):
             else:
                 year_start, year_stop = st.slider("Release years", min_value=first, max_value=last,
                                                   value=default_years)
-            show_table(q.rankings(db, minimum, genre, year_start, year_stop))
+            filters = (minimum, genre, year_start, year_stop)
+            show_table(q.rankings(db, *filters))
             st.caption("Top 25. Release-year filters exclude movies with an unknown year.")
             with st.expander("How MySQL executes this ranking"):
-                filters = (minimum, genre, year_start, year_stop)
                 if st.button("Run join plan"):
                     st.session_state["ranking_plan"] = (filters, q.ranking_plan(db, *filters))
                 saved_plan = st.session_state.get("ranking_plan")
                 if saved_plan and saved_plan[0] == filters:
                     st.code(saved_plan[1], language="text", wrap_lines=True)
+            show_sql(db, (None, q.rankings_query(*filters)))
     with summary:
         rows = q.genre_stats(db)
         if rows:
@@ -101,6 +114,7 @@ def rankings(db):
                          sort="-rating_count")
         show_table(rows)
         st.caption("A rating counts once in each of its movie’s genres. Genre totals overlap.")
+        show_sql(db, (None, (q.GENRE_STATS_SQL, ())))
 
 
 def rating_activity(db, stats):
@@ -117,11 +131,14 @@ def rating_activity(db, stats):
             count = q.rating_count(db, start, stop)
             st.caption(f"{count:,} matching ratings. Showing up to 250 in chronological order.")
             show_table(q.rating_activity(db, start, stop), "No ratings in this date range.")
+            show_sql(db, ("Matching rating count", q.rating_count_query(start, stop)),
+                     ("Rating activity", q.rating_activity_query(start, stop)))
         else:
             st.info("Select a start and end date.")
     with by_user:
         show_table(q.active_users(db))
         st.caption("Top 25 users by ratings submitted. MovieLens uses anonymized user IDs.")
+        show_sql(db, (None, q.active_users_query()))
 
 
 def index_lab(db, stats):
