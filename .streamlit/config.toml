@@ -10,7 +10,7 @@ font = "sans serif"
 gatherUsageStats = false
 
 [client]
-toolbarMode = "viewer"
+toolbarMode = "minimal"
 
 [server]
 address = "127.0.0.1"
