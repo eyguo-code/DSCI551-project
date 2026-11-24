@@ -47,7 +47,7 @@ class MySQLDemoTest(unittest.TestCase):
             self.assertEqual(len(rows), 13)
             self.assertEqual(rows[0]["rated_at"].isoformat(), "2017-01-01T15:26:08")
 
-    def test_index_comparison_runs_identical_query_and_keeps_baseline(self):
+    def test_index_comparison_forces_candidate_and_keeps_baseline(self):
         from movielens.db import connect
         from movielens.experiment import compare
 
@@ -57,6 +57,12 @@ class MySQLDemoTest(unittest.TestCase):
             self.assertIn("Table scan", result["baseline"]["plan"])
             self.assertIn("idx_ratings_rated_at", result["candidate"]["plan"])
             self.assertGreater(result["baseline"]["median_ms"], 0)
+
+            wide = compare(db, date(2000, 1, 1), date(2018, 1, 1), repeats=1)
+            self.assertEqual(wide["matched"], 83516)
+            self.assertIn("Table scan", wide["baseline"]["plan"])
+            self.assertIn("Index range scan", wide["candidate"]["plan"])
+            self.assertTrue(wide["candidate"]["used_timestamp_index"])
             with db.cursor() as cursor:
                 cursor.execute("SELECT @@SESSION.optimizer_switch AS switches")
                 self.assertIn("use_invisible_indexes=off", cursor.fetchone()["switches"])

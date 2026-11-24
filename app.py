@@ -6,7 +6,7 @@ from pymysql import MySQLError
 
 from movielens import queries as q
 from movielens.db import connect
-from movielens.experiment import BENCHMARK_SQL, compare
+from movielens.experiment import BENCHMARK_SQL, FORCED_BENCHMARK_SQL, compare
 
 
 DAY = timedelta(days=1)
@@ -126,17 +126,21 @@ def rating_activity(db, stats):
 
 def index_lab(db, stats):
     st.subheader("Test the timestamp index")
-    st.write("Compare two plans for the same date-range query. The timestamp index is eligible in the second plan.")
+    st.write("Compare the baseline plan with a plan that forces the timestamp index for the same date range.")
     window = st.selectbox("Date window (UTC)", list(INDEX_WINDOWS))
     start, stop = INDEX_WINDOWS[window]
     st.caption("The query returns the full matching date range. Timings are medians of five runs and include fetching rows.")
     if st.button("Run MySQL comparison", type="primary", key="run_index"):
         with st.spinner("Running both MySQL plans and timing the queries…"):
-            st.session_state["index_result"] = (window, compare(db, start, stop))
+            st.session_state["forced_index_result"] = (window, compare(db, start, stop))
 
-    with st.expander("SQL query"):
-        st.code(BENCHMARK_SQL % (f"'{start}'", f"'{stop}'"), language="sql")
-    saved = st.session_state.get("index_result")
+    with st.expander("SQL queries"):
+        params = (f"'{start}'", f"'{stop}'")
+        st.caption("Baseline query")
+        st.code(BENCHMARK_SQL % params, language="sql")
+        st.caption("Forced index query")
+        st.code(FORCED_BENCHMARK_SQL % params, language="sql")
+    saved = st.session_state.get("forced_index_result")
     if saved is None or saved[0] != window:
         return
 
@@ -145,14 +149,14 @@ def index_lab(db, stats):
     match_col, baseline_col, candidate_col = st.columns(3)
     match_col.metric("Matching ratings", f"{result['matched']:,}")
     baseline_col.metric("Baseline median", f"{baseline['median_ms']:,.2f} ms")
-    candidate_col.metric("Index available median", f"{candidate['median_ms']:,.2f} ms")
+    candidate_col.metric("Forced index median", f"{candidate['median_ms']:,.2f} ms")
     st.caption(f"The window matches {result['matched'] / stats['ratings']:.2%} of all ratings.")
     if candidate["used_timestamp_index"]:
-        st.success("MySQL chose the timestamp index when it was available.")
+        st.success("The candidate plan used the timestamp index.")
     else:
-        st.info("MySQL chose a different access path even with the timestamp index available.")
+        st.warning("The candidate plan did not use the timestamp index.")
 
-    before, after = st.tabs(("Baseline plan", "Index available plan"))
+    before, after = st.tabs(("Baseline plan", "Forced index plan"))
     with before:
         st.code(baseline["plan"], language="text", wrap_lines=True)
     with after:

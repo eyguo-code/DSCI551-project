@@ -13,9 +13,14 @@ BENCHMARK_SQL = (
     f"ORDER BY {DATE_ORDER}"
 )
 
+FORCED_BENCHMARK_SQL = BENCHMARK_SQL.replace(
+    "FROM ratings AS r\n",
+    f"FROM ratings AS r FORCE INDEX ({INDEX_NAME})\n",
+)
+
 
 def compare(db, start, stop, repeats=5):
-    """Compare the same MySQL query with and without an eligible timestamp index."""
+    """Compare the baseline against a forced timestamp index for the same date range."""
     if start >= stop or repeats < 1:
         raise ValueError("Use a nonempty date window and at least one timing run.")
 
@@ -27,6 +32,7 @@ def compare(db, start, stop, repeats=5):
     original = select(db, "SELECT @@SESSION.optimizer_switch AS options")[0]["options"]
     params = (start, stop)
     switches = {"baseline": "off", "candidate": "on"}
+    sql_by_mode = {"baseline": BENCHMARK_SQL, "candidate": FORCED_BENCHMARK_SQL}
     result = {mode: {"samples": []} for mode in switches}
     with db.cursor() as cursor:
         def set_mode(mode):
@@ -36,8 +42,9 @@ def compare(db, start, stop, repeats=5):
             warmup_rows = {}
             for mode in switches:
                 set_mode(mode)
-                warmup_rows[mode] = select(db, BENCHMARK_SQL, params)
-                plan = select(db, f"EXPLAIN ANALYZE FORMAT=TREE {BENCHMARK_SQL}", params)
+                sql = sql_by_mode[mode]
+                warmup_rows[mode] = select(db, sql, params)
+                plan = select(db, f"EXPLAIN ANALYZE FORMAT=TREE {sql}", params)
                 result[mode]["plan"] = "\n".join(next(iter(row.values())) for row in plan)
 
             if warmup_rows["baseline"] != warmup_rows["candidate"]:
@@ -51,7 +58,7 @@ def compare(db, start, stop, repeats=5):
                 for mode in order:
                     set_mode(mode)
                     started = perf_counter()
-                    select(db, BENCHMARK_SQL, params)
+                    select(db, sql_by_mode[mode], params)
                     result[mode]["samples"].append((perf_counter() - started) * 1000)
         finally:
             cursor.execute("SET SESSION optimizer_switch = %s", (original,))

@@ -32,9 +32,9 @@ The importer creates the tables, inserts the snapshot in one transaction, and re
 1. **Explore.** Search for **Toy Story** and filter by **Animation**. Show the genres and user tags attached to each movie.
 2. **Rankings.** Start with 20 minimum ratings. Switch to **By genre and year** for 1990s Drama and run the join plan to see how MySQL looks up movies and ratings. Open **Genre comparison** for counts and averages. A rating appears in each genre assigned to its movie.
 3. **Rating activity.** The default window of January 1–7, 2017 has 13 ratings, ordered by UTC timestamp. Switch to **Most active users** to see rating counts and average scores by anonymized user ID.
-4. **Index lab.** Run the **7 days** window, compare the two plans, then run the **18 years** window. Point out the access method, the sort step, actual rows, and whether the index changes the plan. The wider window matches 83,516 ratings and may favor a different access path.
+4. **Index lab.** Run the **7 days** window, compare the two plans, then run the **18 years** window. Point out the access method, the sort step, actual rows, and how the timings change as the window grows. The wider window matches 83,516 ratings.
 
-The experiment makes `idx_ratings_rated_at` eligible only in the comparison session. The invisible index remains physically present while the baseline optimizer ignores it. Both modes fetch the same ordered rows and use the same SQL. The timing is the median of five warmed client-side runs per mode, including result transfer and decoding. `EXPLAIN ANALYZE` provides MySQL’s server-side plan and timings. [MySQL invisible indexes](https://dev.mysql.com/doc/refman/8.4/en/invisible-indexes.html) · [MySQL EXPLAIN](https://dev.mysql.com/doc/refman/8.4/en/explain.html)
+The baseline optimizer ignores the invisible `idx_ratings_rated_at` index. The candidate enables invisible indexes for the session and uses `FORCE INDEX` to request the timestamp index. Both modes fetch the same ordered rows. The timing is the median of five warmed client-side runs per mode, including result transfer and decoding. `EXPLAIN ANALYZE` provides MySQL’s server-side plan and timings. [MySQL invisible indexes](https://dev.mysql.com/doc/refman/8.4/en/invisible-indexes.html) · [MySQL EXPLAIN](https://dev.mysql.com/doc/refman/8.4/en/explain.html)
 
 ### Observed execution plans
 
@@ -44,7 +44,7 @@ These are examples from the supplied snapshot on MySQL 26.7. Use the live plans 
 | --- | --- |
 | 1990s Drama, at least 20 ratings | Scanned 9,742 movies, used the `movie_genres` composite primary key to test genre membership, then looked up ratings by movie with `idx_ratings_movie`. The nested-loop join produced 15,879 rows against an estimate of 12,172. MySQL aggregated those rows, applied the rating-count cutoff, and sorted 197 eligible titles for the top 25. |
 | Seven days in January 2017 | The baseline scanned 100,836 ratings and sorted the 13 matches. The timestamp index read the 13-row range in order, with no separate sort. |
-| 2000–2017 | Both plans scanned the ratings table and sorted 83,516 matches. The window covered 82.8% of the table, making the full scan the optimizer’s choice even with the timestamp index eligible. |
+| 2000–2017 | The baseline scanned the ratings table and sorted 83,516 matches. With the index eligible and no hint, MySQL also chose a full scan. The lab now uses `FORCE INDEX` to measure the timestamp index for this window. |
 
 ## Database model
 
